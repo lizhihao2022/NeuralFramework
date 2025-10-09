@@ -1,6 +1,6 @@
 from .base import BaseModel
 
 
-ALL_MODELS = {
+_model_dict = {
     "BaseModel": BaseModel,
 }

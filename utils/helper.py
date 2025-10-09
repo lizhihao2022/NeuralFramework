@@ -22,10 +22,7 @@ def set_device(cuda, device):
 def load_config(args):
     with open(args['config_path'], 'r') as stream:
         config = yaml.load(stream, yaml.FullLoader)
-    for key in config.keys():
-        for k, v in config[key].items():
-            args[k] = v
-    return args
+    return config
 
 
 def save_config(args, saving_path):
@@ -42,7 +39,10 @@ def get_dir_path(model, dataset, path):
     return dir_path, dir_name
 
 
-def set_up_logger(model, dataset, log_dir):
+def set_up_logger(args):
+    model = args['model']['name']
+    dataset = args['data']['dataset']
+    log_dir = args['log']['log_dir']
     log_dir, dir_name = get_dir_path(model, dataset, log_dir)
     logging.basicConfig(
         format="%(asctime)s %(levelname)-8s %(message)s",
@@ -59,3 +59,22 @@ def set_up_logger(model, dataset, log_dir):
     logging.info("Saving logs in: {}".format(log_dir))
 
     return log_dir, dir_name
+
+
+def save_code(module, saving_path, with_dir=False, with_path=False):
+    os.makedirs(os.path.join(saving_path, 'code'), exist_ok=True)
+    
+    if with_path:
+        src = module
+    else:
+        if with_dir:
+            src = os.path.dirname(module.__file__)
+        else:
+            src = module.__file__
+    print('Saving code from {} to {}'.format(src, saving_path))
+    dst = os.path.join(saving_path, 'code', os.path.basename(src))
+    
+    if os.path.isdir(src):
+        shutil.copytree(src, dst)
+    else:
+        shutil.copy2(src, dst)

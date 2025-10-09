@@ -3,7 +3,7 @@ import logging
 import wandb
 import torch
 
-from ..builders import BaseTrainer
+from trainer import BaseTrainer
 from datasets import MyDataset
 
 TRAINER_DICT = {
@@ -25,7 +25,6 @@ def base_procedure(args):
             tags=[args['model'], args['dataset']],
             config=args)
     
-    # load data
     if args['verbose']:
         logger("Loading {} dataset, subset is {}".format(args['dataset'], args['subset']))
     start = time()
