@@ -1,0 +1,63 @@
+# =============================
+# Generic experiment config
+# =============================
+
+model:
+  # Key used to select the trainer from _trainer_dict
+  name: 'MLP'
+  in_dim: 3
+  out_dim: 1
+  hidden_dims: [64, 64, 64]
+  activation: 'gelu'
+  dropout: 0.0
+  use_residual: True
+
+data:
+  name: 'ns2d' # Path to your data file or root directory
+  data_path: '/ai/gno/DATA/ns/ns_V1e-5_N1200_T20.mat'
+  shape: [64, 64]
+  train_batchsize: 64
+  eval_batchsize: 64
+  train_ratio: 0.8
+  valid_ratio: 0.1
+  test_ratio: 0.1
+  subset: false
+  subset_ratio: 0.1
+  normalize: true
+  normalizer_type: 'PGN'      # or 'Standard', 'MinMax', etc.
+
+train:
+  seed: 42
+  epochs: 500
+  patience: 10  # Early stopping patience; -1 means "disable early stopping"
+  eval_freq: 10
+  saving_best: true      # save best checkpoint on validation metrics
+  load_ckpt: false       # whether to resume from a checkpoint
+  saving_ckpt: true      # whether to save intermediate checkpoints
+  ckpt_freq: 10          # save checkpoint every N epochs
+  ckpt_max: 3            # keep at most N recent checkpoints
+  # Distributed training flags (DDP)
+  distribute: false
+  distribute_mode: 'DDP'
+  device_ids: [0, 1, 2, 3]
+
+optimize:
+  optimizer: 'AdamW'
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  # You can add extra optimizer kwargs if needed, e.g.:
+  # betas: [0.9, 0.999]
+  # eps: 1.0e-8
+
+schedule:
+  scheduler: 'StepLR'
+  step_size: 100
+  gamma: 0.8
+
+log:
+  verbose: true           # print progress to stdout
+  log: true               # enable logging to file
+  log_dir: './logs'       # root directory for logs / checkpoints
+  wandb: false
+  wandb_project: ''
+  wandb_run_name: ''      # if empty, your logger can auto-generate a name
