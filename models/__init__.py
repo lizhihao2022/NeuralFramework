@@ -1,6 +1,6 @@
-from .base import BaseModel
+# models/__init__.py
+from .mlp import MLP
 
-
-_model_dict = {
-    "BaseModel": BaseModel,
+MODEL_REGISTRY = {
+    "MLP": MLP,
 }

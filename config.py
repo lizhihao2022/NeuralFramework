@@ -1,3 +1,4 @@
+# config.py
 import argparse
 
 parser = argparse.ArgumentParser(description='PROJECT NAME')

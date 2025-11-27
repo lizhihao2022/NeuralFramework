@@ -1,39 +1,57 @@
+# =============================
+# Generic experiment config
+# =============================
+
 model:
-  model_name: 'MLP'
+  # Key used to select the trainer from _trainer_dict
+  name: 'YourTrainerName'
 
 data:
-  dataset: 'Base'
-  data_path: '../data/'
-  train_ratio: 0.6
-  valid_ratio: 0.2
-  test_ratio: 0.2
-  subset: False
+  name: 'YourDatasetName' # Path to your data file or root directory
+  data_path: '/path/to/your/data'
+  shape: [64, 64]
+  train_batchsize: 64
+  eval_batchsize: 64
+  train_ratio: 0.98
+  valid_ratio: 0.01
+  test_ratio: 0.01
+  subset: false
   subset_ratio: 0.1
-  train_batchsize: 100
-  eval_batchsize: 100
+  normalize: true
+  normalizer_type: 'PGN'      # or 'Standard', 'MinMax', etc.
 
 train:
-  random_seed: 42
-  cuda: True
-  device: 0
-  epochs: 1000
-  patience: 10
-  eval_freq: 5
-  saving_best: True
-  saving_checkpoint: True
-  checkpoint_freq: 100  
+  seed: 42
+  epochs: 500
+  patience: -1  # Early stopping patience; -1 means "disable early stopping"
+  eval_freq: 10
+  saving_best: true      # save best checkpoint on validation metrics
+  load_ckpt: false       # whether to resume from a checkpoint
+  saving_ckpt: true      # whether to save intermediate checkpoints
+  ckpt_freq: 10          # save checkpoint every N epochs
+  ckpt_max: 3            # keep at most N recent checkpoints
+  # Distributed training flags (DDP)
+  distribute: false
+  distribute_mode: 'DDP'
+  device_ids: [0, 1, 2, 3]
 
 optimize:
-  optimizer: 'Adam'
-  lr: 0.001
-  weight_decay: 0.0001
-  momentum: 0.95
-  milestones: [150, 300, 450]
-  gamma: 0.5
+  optimizer: 'AdamW'
+  lr: 4.0e-5
+  weight_decay: 1.0e-4
+  # You can add extra optimizer kwargs if needed, e.g.:
+  # betas: [0.9, 0.999]
+  # eps: 1.0e-8
+
+schedule:
+  scheduler: 'StepLR'
+  step_size: 100
+  gamma: 0.8
 
 log:
-  verbose: True
-  log: True
-  log_dir: './logs'
-  wandb: False
+  verbose: true           # print progress to stdout
+  log: true               # enable logging to file
+  log_dir: './logs'       # root directory for logs / checkpoints
+  wandb: false
   wandb_project: ''
+  wandb_run_name: ''      # if empty, your logger can auto-generate a name

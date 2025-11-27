@@ -1,5 +1,7 @@
-from .base import MyDataset
+# datasets/__init__.py
+from .ns2d import NS2DDataset
 
-_dataset_dict = {
-    'mydataset': MyDataset,
+
+DATASET_REGISTRY = {
+    'ns2d': NS2DDataset,
 }
