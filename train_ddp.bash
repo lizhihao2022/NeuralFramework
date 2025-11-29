@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1,3 torchrun --nproc_per_node=2 main.py --config /ai/gno/CODE/NeuralFramework/configs/ns2d/m2no.yaml

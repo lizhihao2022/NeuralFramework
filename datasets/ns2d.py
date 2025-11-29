@@ -1,5 +1,4 @@
 # datasets/ns_2d.py
-
 from __future__ import annotations
 
 from typing import Any, Optional, Tuple
@@ -75,7 +74,8 @@ class NS2DDataset(BaseDataset):
             y_normalizer: normalizer used for outputs
         """
         # raw: (N, H, W, T) -> (N, T, H, W) -> (B, H, W, C=1)
-        data = data_split.permute(0, 3, 1, 2).flatten(0, 1).unsqueeze(-1) # (B, H, W, C)
+        data = data_split[..., 5:15]
+        data = data.permute(0, 3, 1, 2).flatten(0, 1).unsqueeze(-1) # (B, H, W, C)
         
         B, H, W, C = data.shape
 

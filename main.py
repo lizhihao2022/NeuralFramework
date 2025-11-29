@@ -1,9 +1,8 @@
 # main.py
-import torch
 import torch.distributed as dist
 
 from config import parser
-from utils import set_up_logger, set_seed, load_config, save_config, init_distributed
+from utils import set_up_logger, set_seed, set_device, load_config, save_config, init_distributed
 from trainers import TRAINER_REGISTRY
 
 
@@ -18,15 +17,15 @@ def main():
 
     # Ensure "train" sub-dict exists
     train_cfg = args.setdefault("train", {})
-
+    
     if distributed:
         train_cfg["local_rank"] = local_rank
         train_cfg["world_size"] = dist.get_world_size()
         train_cfg["rank"] = dist.get_rank()
     else:
-        train_cfg["local_rank"] = 0
+        train_cfg["local_rank"] = args['train'].get('device_ids', [0])[0]
         train_cfg["world_size"] = 1
-        train_cfg["rank"] = 0
+        train_cfg["rank"] = args['train'].get('device_ids', [0])[0]
 
     # ========= Step 2. Setup logger and save config =========
     if distributed:
@@ -52,11 +51,7 @@ def main():
     # ========= Step 3. Set random seed and (optionally) device =========
     seed = train_cfg.get("seed", 42)
     set_seed(seed)
-
-    if distributed:
-        # local_rank has already been set in init_distributed()
-        torch.cuda.set_device(local_rank)
-    # For single-GPU or CPU setups, you can handle device logic inside trainer
+    set_device(cuda=train_cfg.get("cuda", True), device=train_cfg["local_rank"])
 
     # ========= Step 4. Build trainer (creates model, dataloader, etc.) =========
     trainer_name = args["model"]["name"]
