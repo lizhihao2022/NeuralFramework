@@ -157,7 +157,7 @@ class BaseTrainer:
                 f"cuda:{self.local_rank}" if torch.cuda.is_available() else "cpu"
             )
         else:
-            self.local_rank = 0
+            self.local_rank = self.train_args.get("device_ids", [0])[0]
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def _unwrap(self) -> nn.Module:
@@ -549,11 +549,6 @@ class BaseTrainer:
 
                 y_pred = self.inference(x, y, **kwargs)
 
-                # Decode back to physical scale
-                if self.y_normalizer is not None and hasattr(self.y_normalizer, "decode"):
-                    y_pred = self.y_normalizer.decode(y_pred)
-                    y = self.y_normalizer.decode(y)
-
                 all_y.append(y)
                 all_y_pred.append(y_pred)
 
@@ -562,8 +557,11 @@ class BaseTrainer:
 
         loss = self.loss_fn(y_pred, y)
         total_samples = y.size(0)
-
         loss_record.update({f"{split}_loss": float(loss.item())}, n=total_samples)
+        
+        if self.y_normalizer is not None and hasattr(self.y_normalizer, "decode"):
+            y_pred = self.y_normalizer.decode(y_pred)
+            y = self.y_normalizer.decode(y)
         self.evaluator(y_pred, y, record=loss_record, batch_size=total_samples)
 
         if self.ddp and dist.is_initialized():

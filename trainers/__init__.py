@@ -4,6 +4,7 @@ from .base import BaseTrainer
 TRAINER_REGISTRY = {
     'MLP': BaseTrainer,
     'Transformer': BaseTrainer,
+    'M2NO2d': BaseTrainer,
 }
 
 __all__ = ['BaseTrainer', 'TRAINER_REGISTRY']
