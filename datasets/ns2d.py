@@ -74,13 +74,16 @@ class NS2DDataset(BaseDataset):
             y_normalizer: normalizer used for outputs
         """
         # raw: (N, H, W, T) -> (N, T, H, W) -> (B, H, W, C=1)
-        data = data_split[..., 5:15]
-        data = data.permute(0, 3, 1, 2).flatten(0, 1).unsqueeze(-1) # (B, H, W, C)
+        in_t = self.data_args.get("in_t", 5)
+        out_t = self.data_args.get("out_t", 1)
+        duration = self.data_args.get("duration", 10)
+        data = data_split[..., in_t: in_t + duration + out_t]
+        data = data.permute(0, 3, 1, 2) # (N, T, H, W)
         
-        B, H, W, C = data.shape
+        N, T, H, W = data.shape
 
         if self.normalize:
-            data = data.reshape(B, -1, C)
+            data = data.reshape(N * T, -1, 1)
             if mode == "train":
                 if self.normalizer_type == "PGN":
                     x_normalizer = UnitGaussianNormalizer(data)
@@ -93,15 +96,17 @@ class NS2DDataset(BaseDataset):
                     raise RuntimeError(
                         "Normalizer is None in non-train mode with normalize=True"
                     )
-            data = x_normalizer.encode(data).reshape(B, H, W, C)
+            data = x_normalizer.encode(data).reshape(N, T, H, W)
         
-        x = data[:-1, :, :, :]
-        y = data[1:, :, :, :]
+        x = data[:, :duration, :, :].flatten(0, 1).unsqueeze(-1)  # (B, H, W, C_in)
+        y = data[:, out_t: duration + out_t, :, :].flatten(0, 1).unsqueeze(-1)  # (B, H, W, C_out)
+        
+        B = x.shape[0]
         
         grid_x = torch.linspace(0, 1, H)
-        grid_x = grid_x.reshape(1, H, 1, 1).repeat(B-1, 1, W, 1)
+        grid_x = grid_x.reshape(1, H, 1, 1).repeat(B, 1, W, 1)
         grid_y = torch.linspace(0, 1, W)
-        grid_y = grid_y.reshape(1, 1, W, 1).repeat(B-1, H, 1, 1)
+        grid_y = grid_y.reshape(1, 1, W, 1).repeat(B, H, 1, 1)
         
         x = torch.cat([grid_x, grid_y, x], dim=-1) 
 

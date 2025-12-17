@@ -162,9 +162,9 @@ class BaseForecaster(object):
                 if x_normalizer is not None and hasattr(x_normalizer, "decode"):
                     x = x_normalizer.decode(x[..., -1:])
 
-                all_x.append(x)
-                all_y.append(y)
-                all_y_pred.append(y_pred)
+                all_x.append(x.cpu())
+                all_y.append(y.cpu())
+                all_y_pred.append(y_pred.cpu())
 
         x = torch.cat(all_x, dim=0)
         y = torch.cat(all_y, dim=0)
