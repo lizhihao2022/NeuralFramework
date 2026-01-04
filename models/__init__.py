@@ -5,6 +5,8 @@ from .transformer import Transformer
 from .m2no import M2NO2d
 from .swin_transformer import SwinTransformerV2, SwinMLP
 from .fno import FNO1d, FNO2d, FNO3d
+from .galerkin_transformer import GalerkinTransformer
+from .transolver import Transolver
 
 
 MODEL_REGISTRY = {
@@ -19,11 +21,14 @@ MODEL_REGISTRY = {
     "Transformer": Transformer,
     "SwinTransformerV2": SwinTransformerV2,
     "SwinMLP": SwinMLP,
+    "GalerkinTransformer": GalerkinTransformer,
+    "Transolver": Transolver,
 }
 
 __all__ = [
     "MODEL_REGISTRY", 
     "MLP", "UNet1d", "UNet2d", "UNet3d", 
     "FNO1d", "FNO2d", "FNO3d",
-    "Transformer", "M2NO2d", "SwinTransformerV2", "SwinMLP"
+    "Transformer", "M2NO2d", "SwinTransformerV2", "SwinMLP",
+    "GalerkinTransformer", "Transolver"
     ]

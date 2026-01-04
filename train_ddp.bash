@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 main.py --config /ai/gno/CODE/NeuralFramework/configs/ns2d/fno.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 main.py --config /ai/gno/CODE/NeuralFramework/configs/ns2d/transolver.yaml

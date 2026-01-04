@@ -13,6 +13,8 @@ TRAINER_REGISTRY = {
     'M2NO2d': BaseTrainer,
     'SwinTransformerV2': BaseTrainer,
     'SwinMLP': BaseTrainer,
+    'GalerkinTransformer': BaseTrainer,
+    "Transolver": BaseTrainer,
 }
 
 __all__ = ['BaseTrainer', 'TRAINER_REGISTRY']
