@@ -7,6 +7,9 @@ from .swin_transformer import SwinTransformerV2, SwinMLP
 from .fno import FNO1d, FNO2d, FNO3d
 from .galerkin_transformer import GalerkinTransformer
 from .transolver import Transolver
+from .gnot import GNOT
+from .ono import ONO
+from .lsm import LSM
 
 
 MODEL_REGISTRY = {
@@ -23,6 +26,9 @@ MODEL_REGISTRY = {
     "SwinMLP": SwinMLP,
     "GalerkinTransformer": GalerkinTransformer,
     "Transolver": Transolver,
+    "GNOT": GNOT,
+    "ONO": ONO,
+    "LSM": LSM,
 }
 
 __all__ = [
@@ -30,5 +36,5 @@ __all__ = [
     "MLP", "UNet1d", "UNet2d", "UNet3d", 
     "FNO1d", "FNO2d", "FNO3d",
     "Transformer", "M2NO2d", "SwinTransformerV2", "SwinMLP",
-    "GalerkinTransformer", "Transolver"
+    "GalerkinTransformer", "Transolver", "GNOT", "ONO", "LSM"
     ]
