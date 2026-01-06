@@ -4,6 +4,7 @@ import logging
 from functools import partial
 from typing import Any, Dict, Optional
 
+import inspect
 import torch
 import torch.distributed as dist
 import wandb
@@ -13,7 +14,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from tqdm import tqdm
 
-from utils import LossRecord, LpLoss, Evaluator
+from utils import LossRecord, LpLoss, Evaluator, autoregressive_rollout
 
 from models import MODEL_REGISTRY
 from datasets import DATASET_REGISTRY
@@ -37,6 +38,15 @@ class BaseTrainer:
         # Distributed setup
         # ------------------------------------------------------------------
         self._setup_distribute()
+
+        # Optional geometry / coordinates from dataset
+        self.geom: Optional[Dict[str, Any]] = None
+        self.coords: Optional[torch.Tensor] = None
+
+        # Flags describing which extra arguments model.forward accepts
+        self._model_accepts_coords: bool = False
+        self._model_accepts_geom: bool = False
+        self._model_accepts_y: bool = False
 
         # Logger & wandb
         self.logger = logging.info if self.log_args.get("log", True) else print
@@ -82,6 +92,9 @@ class BaseTrainer:
         for p in self.model.parameters():
             if not p.is_contiguous():
                 p.data = p.data.contiguous()
+
+        # Inspect model.forward signature once
+        self._inspect_model_signature()
 
         self.start_epoch = 0
         self.optimizer = self.build_optimizer()
@@ -180,6 +193,81 @@ class BaseTrainer:
         return self.local_rank == 0
 
     # ----------------------------------------------------------------------
+    # Model signature inspection / unified forward
+    # ----------------------------------------------------------------------
+    def _inspect_model_signature(self) -> None:
+        """
+        Inspect model.forward once and record which extra arguments
+        are supported (coords / geom / y).
+        """
+        base_model = self._unwrap()
+        try:
+            sig = inspect.signature(base_model.forward)
+        except (TypeError, ValueError):
+            # Fallback: assume no extra args
+            self._model_accepts_coords = False
+            self._model_accepts_geom = False
+            self._model_accepts_y = False
+            return
+
+        params = sig.parameters
+        self._model_accepts_coords = "coords" in params
+        self._model_accepts_geom = "geom" in params
+        self._model_accepts_y = "y" in params
+
+        self.main_log(
+            f"Model forward supports: "
+            f"coords={self._model_accepts_coords}, "
+            f"geom={self._model_accepts_geom}, "
+            f"y={self._model_accepts_y}"
+        )
+
+    def _forward_model(
+        self,
+        x: torch.Tensor,
+        y: Optional[torch.Tensor] = None,
+        **extra_kwargs: Any,
+    ) -> torch.Tensor:
+        """
+        Unified forwarding entry for training / evaluation.
+
+        It automatically injects:
+          - coords: batched coordinates if model.forward(coords=...) exists.
+          - geom: geometry dict if model.forward(geom=...) exists.
+          - y: target tensor if model.forward(y=...) exists.
+
+        Args:
+            x:  input tensor (e.g. B x N x C)
+            y:  optional target tensor
+            extra_kwargs: extra keyword args passed through to model.forward
+
+        Returns:
+            Model prediction tensor.
+        """
+        kwargs: Dict[str, Any] = dict(extra_kwargs)
+
+        # Inject coordinates (if available and requested by the model)
+        if self._model_accepts_coords and self.coords is not None:
+            B = x.size(0)
+            coords = self.coords
+            # coords is typically (N_points, d); broadcast to (B, N_points, d)
+            if coords.dim() == 2:
+                coords_batched = coords.unsqueeze(0).expand(B, -1, -1)
+            else:
+                coords_batched = coords
+            kwargs["coords"] = coords_batched
+
+        # Inject geometry (if requested)
+        if self._model_accepts_geom and self.geom is not None:
+            kwargs["geom"] = self.geom
+
+        # Inject y if the model wants it (e.g. diffusion-style models)
+        if self._model_accepts_y and (y is not None):
+            kwargs["y"] = y
+
+        return self.model(x, **kwargs)
+
+    # ----------------------------------------------------------------------
     # Init / build components
     # ----------------------------------------------------------------------
     def get_initializer(self, name: Optional[str]):
@@ -273,6 +361,8 @@ class BaseTrainer:
         return LpLoss(size_average=True)
 
     def build_evaluator(self):
+        # For now we keep using shape from config; if you want, you can
+        # manually set data.shape to match geom["spatial_shape"].
         return Evaluator(shape=self.data_args["shape"])
 
     def build_data(self, **kwargs: Any) -> None:
@@ -283,13 +373,27 @@ class BaseTrainer:
         dataset_cls = DATASET_REGISTRY[self.data_args["name"]]
         dataset = dataset_cls(self.data_args)
 
+        # Geometry / coordinates (if dataset provides them)
+        self.geom = getattr(dataset, "geom", None)
+        self.coords = getattr(dataset, "coords", None)
+        if self.coords is not None:
+            # Move coordinates to current device once
+            self.coords = self.coords.to(self.device)
+        else:
+            self.main_log("Dataset does not provide coordinates tensor")
+
+        if self.geom is not None:
+            self.main_log(f"Dataset geometry: {self.geom}")
+        else:
+            self.main_log("Dataset does not provide geometry dict")
+
         self.train_loader, self.valid_loader, self.test_loader, self.train_sampler = dataset.make_loaders(
             ddp=self.ddp,
             rank=self.local_rank,
             world_size=self.world_size,
             drop_last=True,
         )
-        
+
         self.train_length = len(dataset.train_dataset)
         self.valid_length = len(dataset.valid_dataset)
         self.test_length = len(dataset.test_dataset)
@@ -501,7 +605,9 @@ class BaseTrainer:
             x = x.to(self.device, non_blocking=True)
             y = y.to(self.device, non_blocking=True)
 
-            y_pred = self.model(x)
+            # Unified forward (auto-inject coords / geom / y)
+            y_pred = self._forward_model(x, y)
+
             loss = self.loss_fn(y_pred, y)  # scalar
 
             loss_record.update(
@@ -521,12 +627,32 @@ class BaseTrainer:
 
         return loss_record
 
-    def inference(self, x: torch.Tensor, y: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+    def _one_step(self, x: torch.Tensor, y: Optional[torch.Tensor] = None, **kwargs: Any) -> torch.Tensor:
         """
-        Default inference: plain forward, reshaped to match y.
+        One-step inference: unified forward.
         Override in subclasses if needed.
         """
-        return self.model(x).reshape(y.shape)
+        y_pred = self._forward_model(x, y, **kwargs)
+        return y_pred
+    
+    def inference(self, x: torch.Tensor, y: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+        """
+        Default inference: unified forward, reshaped to match y.
+        Override in subclasses if needed.
+        x: (B, N, C_in)
+        y: one-step -> (B, N, C_out)
+           rollout -> (B, S, N, C_out)
+        """
+        if y.ndim == 3: # one_step
+            y_pred = self._one_step(x, y, **kwargs)
+            return y_pred.reshape_as(y)
+        elif y.ndim == 4: # autoregressive rollout
+            b, s, n, c = y.shape
+            u0 = x[..., -1:].contiguous() # (B, N, C_in)
+            seq = autoregressive_rollout(self._one_step, u0, y, steps=s)
+            return seq.reshape_as(y)
+        
+        raise ValueError(f"Unsupported y shape for inference: {tuple(y.shape)}")
 
     def evaluate(self, split: str = "valid", **kwargs: Any) -> LossRecord:
         if split == "valid":
@@ -558,7 +684,7 @@ class BaseTrainer:
         loss = self.loss_fn(y_pred, y)
         total_samples = y.size(0)
         loss_record.update({f"{split}_loss": float(loss.item())}, n=total_samples)
-        
+
         if self.y_normalizer is not None and hasattr(self.y_normalizer, "decode"):
             y_pred = self.y_normalizer.decode(y_pred)
             y = self.y_normalizer.decode(y)

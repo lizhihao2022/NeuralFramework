@@ -60,6 +60,13 @@ from .vis import (
     ns2d_vis,
 )
 
+# ----------------------------------------------------------------------
+# Rollout utilities
+# ----------------------------------------------------------------------
+from .rollout import (
+    autoregressive_rollout,
+)
+
 __all__ = [
     # helper
     "set_seed",
@@ -91,4 +98,6 @@ __all__ = [
     "Evaluator",
     # vis
     "ns2d_vis",
+    # rollout
+    "autoregressive_rollout",
 ]

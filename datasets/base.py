@@ -1,4 +1,4 @@
-# datasets/base_dataset.py
+# datasets/base.py
 
 from __future__ import annotations
 
@@ -52,7 +52,8 @@ class BaseDataset(ABC):
           * self.train_dataset
           * self.valid_dataset
           * self.test_dataset
-          * self.normalizer (if any, defined by subclasses)
+          * self.x_normalizer / self.y_normalizer (if any, defined by subclasses)
+          * self.geom / self.coords (optional, defined by subclasses)
 
     Subclasses SHOULD implement:
       - load_raw_data(self, **kwargs) -> Any
@@ -85,9 +86,16 @@ class BaseDataset(ABC):
         # Cache path
         self.cache_path: str = self.get_cache_path()
 
-        # Normalizer (subclass decides its type and content)
+        # Normalizers (subclass decides its type and content)
         self.x_normalizer: Optional[Any] = None
         self.y_normalizer: Optional[Any] = None
+
+        # Optional geometry / coordinates (subclass may fill these)
+        # Example for grid data:
+        #   self.geom = {"dim": 2, "layout": "grid", "spatial_shape": (H, W), ...}
+        #   self.coords = torch.Tensor of shape (N_points, d)
+        self.geom: Optional[Dict[str, Any]] = None
+        self.coords: Optional[torch.Tensor] = None
 
         # Load or process data
         (
@@ -103,7 +111,10 @@ class BaseDataset(ABC):
 
         # Apply subset if requested
         if self.subset:
-            def _apply_subset(x: torch.Tensor, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            def _apply_subset(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
                 n = max(1, int(len(x) * self.subset_ratio))
                 return x[:n], y[:n]
 
@@ -156,7 +167,7 @@ class BaseDataset(ABC):
 
         Subclasses can override if they need a more complex split logic.
         """
-        if isinstance(raw, (torch.Tensor,)):
+        if isinstance(raw, torch.Tensor):
             N = raw.shape[0]
         else:
             # assume __len__ is available
@@ -165,14 +176,9 @@ class BaseDataset(ABC):
         train_end = int(N * self.train_ratio)
         valid_end = int(N * (self.train_ratio + self.valid_ratio))
 
-        if isinstance(raw, torch.Tensor):
-            train_block = raw[:train_end]
-            valid_block = raw[train_end:valid_end]
-            test_block = raw[valid_end:]
-        else:
-            train_block = raw[:train_end]
-            valid_block = raw[train_end:valid_end]
-            test_block = raw[valid_end:]
+        train_block = raw[:train_end]
+        valid_block = raw[train_end:valid_end]
+        test_block = raw[valid_end:]
 
         return train_block, valid_block, test_block
 
@@ -188,13 +194,7 @@ class BaseDataset(ABC):
         Subclass SHOULD override this.
 
         Default behavior:
-          - treat data_split as both x and y (identity mapping)
-          - no normalization
-
-        Returns:
-            x: input tensor
-            y: target tensor
-            normalizer: possibly updated normalizer (for 'train' mode)
+          - requires subclass implementation
         """
         raise NotImplementedError("Subclasses must implement process_split().")
 
@@ -221,19 +221,56 @@ class BaseDataset(ABC):
         y_normalizer: Optional[Any],
     ) -> None:
         """
-        Default cache format: a tuple of (train_x, train_y, valid_x, valid_y, test_x, test_y, normalizer).
+        Save processed tensors, normalizers and optional geometry.
         """
-        os.makedirs(osp.dirname(self.cache_path), exist_ok=True)
-        torch.save(
-            (train_x, train_y, valid_x, valid_y, test_x, test_y, x_normalizer, y_normalizer),
-            self.cache_path,
-        )
+        cache_dir = osp.dirname(self.cache_path)
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
+
+        payload = {
+            "train_x": train_x,
+            "train_y": train_y,
+            "valid_x": valid_x,
+            "valid_y": valid_y,
+            "test_x": test_x,
+            "test_y": test_y,
+            "x_normalizer": x_normalizer,
+            "y_normalizer": y_normalizer,
+            # optional geometry metadata
+            "geom": self.geom,
+            "coords": self.coords,
+        }
+
+        torch.save(payload, self.cache_path)
 
     def load_from_cache(self) -> Tuple[torch.Tensor, ...]:
         """
-        Reverse of save_to_cache; subclasses can override for custom formats.
+        Load processed tensors, normalizers and geometry from cache.
         """
-        return torch.load(self.cache_path)
+        obj = torch.load(self.cache_path)
+
+        self.geom = obj.get("geom", None)
+        self.coords = obj.get("coords", None)
+
+        train_x = obj["train_x"]
+        train_y = obj["train_y"]
+        valid_x = obj["valid_x"]
+        valid_y = obj["valid_y"]
+        test_x = obj["test_x"]
+        test_y = obj["test_y"]
+        x_normalizer = obj.get("x_normalizer", None)
+        y_normalizer = obj.get("y_normalizer", None)
+
+        return (
+            train_x,
+            train_y,
+            valid_x,
+            valid_y,
+            test_x,
+            test_y,
+            x_normalizer,
+            y_normalizer,
+        )
 
     # ------------------------------------------------------------------
     # Internal logic
@@ -267,7 +304,16 @@ class BaseDataset(ABC):
             test_block, mode="test", x_normalizer=x_normalizer, y_normalizer=y_normalizer
         )
 
-        self.save_to_cache(train_x, train_y, valid_x, valid_y, test_x, test_y, x_normalizer, y_normalizer)
+        self.save_to_cache(
+            train_x,
+            train_y,
+            valid_x,
+            valid_y,
+            test_x,
+            test_y,
+            x_normalizer,
+            y_normalizer,
+        )
 
         return train_x, train_y, valid_x, valid_y, test_x, test_y, x_normalizer, y_normalizer
 
@@ -280,7 +326,7 @@ class BaseDataset(ABC):
         drop_last: bool = True,
     ) -> Tuple[DataLoader, DataLoader, DataLoader, Optional[DistributedSampler]]:
         """
-        Create train/valid/test DataLoaders using self.data_config.
+        Create train/valid/test DataLoaders using self.data_args.
 
         Args:
             ddp: whether using DistributedDataParallel.
@@ -289,7 +335,7 @@ class BaseDataset(ABC):
             drop_last: whether to drop last batch in training.
 
         Returns:
-            train_loader, valid_loader, test_loader, x_normalizer, y_normalizer
+            train_loader, valid_loader, test_loader, train_sampler
         """
         train_bs = self.data_args.get("train_batchsize", 10)
         eval_bs = self.data_args.get("eval_batchsize", 10)
