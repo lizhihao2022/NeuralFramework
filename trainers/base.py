@@ -361,9 +361,23 @@ class BaseTrainer:
         return LpLoss(size_average=True)
 
     def build_evaluator(self):
-        # For now we keep using shape from config; if you want, you can
-        # manually set data.shape to match geom["spatial_shape"].
-        return Evaluator(shape=self.data_args["shape"])
+        # Configurable evaluation metrics (see YAML: `evaluate` section).
+        eval_args = (self.args.get("evaluate") or {})
+        metric_cfg = eval_args.get("metrics", None)
+        strict = bool(eval_args.get("strict", True))
+        rollout_args = (eval_args.get("rollout") or {})
+        rollout_per_step = bool(rollout_args.get("per_step", True))
+
+        # Optional global kwargs for metrics
+        metric_kwargs = eval_args.get("metric_kwargs", None) or eval_args.get("kwargs", None) or {}
+
+        return Evaluator(
+            shape=self.data_args.get("shape"),
+            metric_cfg=metric_cfg,
+            strict=strict,
+            rollout_per_step=rollout_per_step,
+            **metric_kwargs,
+        )
 
     def build_data(self, **kwargs: Any) -> None:
         if self.data_args["name"] not in DATASET_REGISTRY:

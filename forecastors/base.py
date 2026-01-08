@@ -213,7 +213,21 @@ class BaseForecaster(object):
     # Evaluator / dataset
     # ------------------------------------------------------------------
     def build_evaluator(self) -> None:
-        self.evaluator = Evaluator(self.shape)
+        # Configurable evaluation metrics (from saved config.yaml: `evaluate`).
+        eval_args = (self.args.get("evaluate") or {})
+        metric_cfg = eval_args.get("metrics", None)
+        strict = bool(eval_args.get("strict", True))
+        rollout_args = (eval_args.get("rollout") or {})
+        rollout_per_step = bool(rollout_args.get("per_step", True))
+        metric_kwargs = eval_args.get("metric_kwargs", None) or eval_args.get("kwargs", None) or {}
+
+        self.evaluator = Evaluator(
+            shape=self.shape,
+            metric_cfg=metric_cfg,
+            strict=strict,
+            rollout_per_step=rollout_per_step,
+            **metric_kwargs,
+        )
 
     def build_data(
         self,
@@ -348,104 +362,95 @@ class BaseForecaster(object):
     @torch.no_grad()
     def forecast(
         self,
-        loader: data.DataLoader,
-        x_normalizer: Optional[Any] = None,
-        y_normalizer: Optional[Any] = None,
-        return_all: bool = False,
+        loader,
+        *,
         return_rollout_info: bool = False,
-        **kwargs: Any,
-    ) -> Any:
+    ) -> Tuple[Dict[str, float], Optional[Dict[str, Any]]]:
         """
-        Run forecast over a dataloader and compute metrics.
+        Run inference on `loader` and compute metrics.
 
-        If return_rollout_info=True for rollout targets, also return:
-            {
-              "rollout_steps": int,
-              "rmse_per_step": List[float],
-              "rmse_rollout_mean": float
-            }
+        This version unifies:
+        - one-step: pred/target in (B, N, C) or (B, *shape, C)
+        - rollout:  pred/target in (B, S, N, C) or (B, S, *shape, C)
+
+        Returns:
+        metrics_scalar: dict of scalar metrics averaged by LossRecord (e.g., rmse/psnr/ssim or *_rollout_mean)
+        rollout_info:   optional dict containing per-step curves for rollout, e.g.:
+                        {"rollout_steps": S, "rmse_per_step": [...], "rmse_rollout_mean": ...}
+                        Actually keys follow your config metric keys:
+                        - "<metric>_per_step"
+                        - "<metric>_rollout_mean"
         """
+        assert hasattr(self, "model"), "BaseForecaster must have self.model"
+        assert hasattr(self, "evaluator"), "Call build_evaluator() before forecast()."
+
+        self.model.eval()
+
+        # Create a LossRecord with metric keys (plus optional extra keys if you want)
         loss_record = self.evaluator.init_record()
 
-        all_x: List[torch.Tensor] = []
         all_y: List[torch.Tensor] = []
         all_y_pred: List[torch.Tensor] = []
 
-        self.model.eval()
-        for x, y in loader:
+        # ----------------- inference loop -----------------
+        for batch in loader:
+            # --- adapt this block to your dataset's batch format ---
+            if isinstance(batch, dict):
+                x = batch.get("x", None)
+                y = batch.get("y", None)
+                if x is None or y is None:
+                    raise KeyError("Batch dict must contain keys 'x' and 'y' (or adjust this code).")
+            elif isinstance(batch, (list, tuple)):
+                if len(batch) < 2:
+                    raise ValueError("Batch tuple/list must be (x, y) or (x, y, ...).")
+                x, y = batch[0], batch[1]
+            else:
+                raise TypeError(f"Unsupported batch type: {type(batch)}")
+
             x = x.to(self.device, non_blocking=True)
             y = y.to(self.device, non_blocking=True)
 
-            y_pred = self.inference(x, y, **kwargs)
+            # --- forward ---
+            # If your model returns dict, adapt here.
+            y_pred = self.model(x)
+            if isinstance(y_pred, dict):
+                # common patterns: {"pred": ...} / {"y": ...}
+                y_pred = y_pred.get("pred", y_pred.get("y", None))
+                if y_pred is None:
+                    raise KeyError("Model output dict must contain 'pred' or 'y' (or adjust this code).")
 
-            # decode y / y_pred to physical scale
-            y_pred_phys = _decode_field(y_normalizer, y_pred, self.shape)
-            y_phys = _decode_field(y_normalizer, y, self.shape)
+            # Keep on GPU for now; concatenate later
+            all_y.append(y)
+            all_y_pred.append(y_pred)
 
-            # decode the input field channel (last channel of x)
-            if x_normalizer is not None and hasattr(x_normalizer, "decode"):
-                x_u = x[..., -1:].contiguous()
-                x_u_phys = _decode_field(x_normalizer, x_u, self.shape)
-            else:
-                x_u_phys = x[..., -1:].contiguous()
+        if len(all_y) == 0:
+            raise ValueError("Empty loader: no batches to forecast.")
 
-            all_x.append(x_u_phys.detach().cpu())
-            all_y.append(y_phys.detach().cpu())
-            all_y_pred.append(y_pred_phys.detach().cpu())
-
-        x_all = torch.cat(all_x, dim=0)
         y_all = torch.cat(all_y, dim=0)
         y_pred_all = torch.cat(all_y_pred, dim=0)
 
+        # ----------------- metrics (unified) -----------------
+        # Evaluator will:
+        #   - detect rollout vs one-step
+        #   - compute scalar metrics and (optionally) per-step curves for rollout
+        metrics_out = self.evaluator(y_pred_all, y_all, record=loss_record)
+
         rollout_info: Optional[Dict[str, Any]] = None
-        spatial_ndim = len(self.shape)
-
-        # ----------------- metrics -----------------
-        # one-step: (B, *shape, C)
-        if y_all.ndim == spatial_ndim + 2:
-            self.evaluator(y_pred_all, y_all, record=loss_record)
-
-        # rollout: (B, S, *shape, C)
-        elif y_all.ndim == spatial_ndim + 3:
-            B = y_all.shape[0]
-            S = y_all.shape[1]
-            C = y_all.shape[-1]
-
-            # reshape to (B*S, *shape, C) for Evaluator
-            new_shape = (B * S, *self.shape, C)
-            y_flat = y_all.reshape(new_shape)
-            y_pred_flat = y_pred_all.reshape(new_shape)
-
-            self.evaluator(y_pred_flat, y_flat, record=loss_record)
-
-            # per-step RMSE on physical scale
-            diff = (y_pred_all - y_all) ** 2
-            reduce_dims = tuple(d for d in range(diff.ndim) if d != 1)  # keep step dim
-            mse_per_step = diff.mean(dim=reduce_dims)  # (S,)
-            rmse_per_step = torch.sqrt(mse_per_step.clamp_min(0.0))
-
+        if return_rollout_info and isinstance(metrics_out, dict) and "rollout_steps" in metrics_out:
+            # Only keep rollout-related fields (do NOT try to put lists into LossRecord)
             rollout_info = {
-                "rollout_steps": int(S),
-                "rmse_per_step": [float(v) for v in rmse_per_step.tolist()],
-                "rmse_rollout_mean": float(rmse_per_step.mean().item()),
+                k: v
+                for k, v in metrics_out.items()
+                if k == "rollout_steps" or k.endswith("_per_step") or k.endswith("_rollout_mean")
             }
 
-        else:
-            raise ValueError(
-                f"Unexpected target shape {tuple(y_all.shape)} "
-                f"for spatial_ndim={spatial_ndim}"
-            )
+        # Convert LossRecord averages into a clean scalar dict for return/logging
+        metrics_scalar: Dict[str, float] = {}
+        for k in loss_record.loss_list:
+            if k in loss_record.loss_dict:
+                metrics_scalar[k] = float(loss_record.loss_dict[k].avg)
 
+        # (optional) print for debugging
         print(loss_record)
 
-        # ----------------- return -----------------
-        if return_all and return_rollout_info:
-            return loss_record, x_all, y_all, y_pred_all, rollout_info
-
-        if return_all:
-            return loss_record, x_all, y_all, y_pred_all
-
-        if return_rollout_info:
-            return loss_record, rollout_info
-
-        return loss_record
+        return metrics_scalar, rollout_info

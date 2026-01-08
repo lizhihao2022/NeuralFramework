@@ -196,11 +196,16 @@ class LossRecord:
 
     def format_metrics(self) -> str:
         parts = []
-        for loss in self.loss_list:
-            avg = self.loss_dict[loss].avg
-            parts.append(f"{loss}: {avg:.8f}")
-        elapsed = time() - self.start_time
-        parts.append(f"Time: {elapsed:.2f}s")
+        for key in self.loss_list:
+            if key not in self.loss_dict:
+                continue
+            v = self.loss_dict[key].avg
+
+            if key == "rollout_steps":
+                parts.append(f"{key}: {int(round(v))}")
+            else:
+                parts.append(f"{key}: {float(v):.8f}")
+
         return " | ".join(parts)
 
     def to_dict(self) -> Dict[str, float]:
