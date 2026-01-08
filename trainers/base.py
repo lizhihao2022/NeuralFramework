@@ -14,7 +14,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from tqdm import tqdm
 
-from utils import LossRecord, LpLoss, Evaluator, autoregressive_rollout
+from utils import LossRecord, LpLoss, autoregressive_rollout, Evaluator
 
 from models import MODEL_REGISTRY
 from datasets import DATASET_REGISTRY

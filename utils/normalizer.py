@@ -1,23 +1,65 @@
 # utils/normalizer.py
+from __future__ import annotations
+
+from typing import Any, Optional, Tuple
+
 import torch
 from torch import nn
-from typing import Optional, Any
+
+
+def _to_device_dtype(t: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    return t.to(device=ref.device, dtype=ref.dtype)
+
+
+def _broadcast_stats_to_x(stats: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    """Broadcast a stats tensor to be compatible with x (channel-last).
+
+    The stats tensor is assumed to be computed as mean/std over training batch:
+    stats shape == x_train.shape[1:].
+
+    This helper prepends leading singleton dims until stats.ndim == x.ndim.
+
+    Args:
+        stats: Tensor of shape (..., C) where last dim is channels.
+        x: Tensor of shape (..., C) where last dim is channels.
+
+    Returns:
+        A tensor with the same ndim as x, broadcastable with x.
+
+    Raises:
+        ValueError: if broadcasting is impossible or channel dim mismatches.
+    """
+    if x.dim() < stats.dim():
+        raise ValueError(
+            f"Stats has higher ndim than input: stats.ndim={stats.dim()}, x.ndim={x.dim()}."
+        )
+    if stats.shape[-1] != x.shape[-1]:
+        raise ValueError(
+            f"Channel dim mismatch: stats.shape[-1]={stats.shape[-1]} vs x.shape[-1]={x.shape[-1]}."
+        )
+
+    out = stats
+    while out.dim() < x.dim():
+        out = out.unsqueeze(0)
+    return out
 
 
 class UnitGaussianNormalizer(nn.Module):
-    """
-    Per-dimension Gaussian normalizer.
+    """Per-dimension Gaussian normalizer (channel-last).
 
-    x is typically shaped like:
-        - (n_train, n)
-        - (n_train, T, n)
-        - (n_train, n, T)
-    and we compute mean/std along dim=0.
+    Statistics are computed along the training batch dimension (dim=0).
+    This implementation supports inputs such as:
+      - (B, N, C)
+      - (B, H, W, C)
+      - (B, S, N, C)
+    by broadcasting mean/std over extra leading dims.
+
+    Note: Broadcasting assumes the non-batch trailing dimensions match those used
+    to compute mean/std (up to extra leading dims like S).
     """
 
     def __init__(self, x: torch.Tensor, eps: float = 1e-5) -> None:
         super().__init__()
-        # Compute statistics along the training batch dimension
         mean = torch.mean(x, dim=0)
         std = torch.std(x, dim=0)
 
@@ -25,57 +67,55 @@ class UnitGaussianNormalizer(nn.Module):
         self.register_buffer("std", std)
         self.eps = eps
 
+    def _select_stats(self, sample_idx: Optional[Any]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Select mean/std by sample_idx for compatibility. Most pipelines should pass None."""
+        if sample_idx is None:
+            return self.mean, self.std
+
+        # Keep backward-compatible behavior with minimal assumptions.
+        # - sample_idx can be a tensor or list/tuple of indices.
+        if isinstance(sample_idx, (list, tuple)):
+            return self.mean[sample_idx], self.std[sample_idx]
+
+        return self.mean[sample_idx], self.std[sample_idx]
+
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Normalize x using stored mean/std.
-        """
-        return (x - self.mean) / (self.std + self.eps)
+        """Normalize x using stored mean/std (channel-last)."""
+        mean, std = self._select_stats(sample_idx=None)
+        mean = _to_device_dtype(mean, x)
+        std = _to_device_dtype(std, x)
+
+        mean = _broadcast_stats_to_x(mean, x)
+        std = _broadcast_stats_to_x(std, x)
+
+        return (x - mean) / (std + self.eps)
 
     def decode(self, x: torch.Tensor, sample_idx: Optional[Any] = None) -> torch.Tensor:
-        """
-        Inverse normalization.
+        """Inverse normalization (channel-last).
 
         Args:
-            x: tensor to be denormalized.
-            sample_idx: optional indices to select a subset of mean/std.
-                        This is kept for compatibility with existing code.
+            x: Tensor to be denormalized. Examples: (B,N,C), (B,H,W,C), (B,S,N,C).
+            sample_idx: Optional indices for compatibility with existing code.
+                       If provided, mean/std are indexed first, then broadcast.
+
+        Returns:
+            Denormalized tensor with the same shape as x.
+
+        Raises:
+            ValueError: if stats cannot be broadcast to x.
         """
-        # Select statistics
-        if sample_idx is None:
-            std = self.std
-            mean = self.mean
-        else:
-            # sample_idx might be a list/tuple of index tensors or a tensor itself.
-            idx0 = sample_idx[0] if isinstance(sample_idx, (list, tuple)) else sample_idx
+        mean, std = self._select_stats(sample_idx=sample_idx)
+        mean = _to_device_dtype(mean, x)
+        std = _to_device_dtype(std, x)
 
-            if self.mean.dim() == idx0.dim():
-                # Case: mean/std indexed directly by batch-like indices
-                std = self.std[sample_idx]
-                mean = self.mean[sample_idx]
-            else:
-                # Case: extra leading dimension, e.g. (T, n) vs (batch,)
-                std = self.std[:, sample_idx]
-                mean = self.mean[:, sample_idx]
+        mean = _broadcast_stats_to_x(mean, x)
+        std = _broadcast_stats_to_x(std, x)
 
-        std = (std + self.eps).to(x.device)
-        mean = mean.to(x.device)
-
-        shape = x.shape
-        B = shape[0]
-        C = shape[-1]
-
-        # Flatten all but batch and channel to apply broadcasting
-        x_flat = x.view(B, -1, C)
-
-        x_flat = x_flat * std + mean
-        x = x_flat.view(*shape)
-        return x
+        return x * (std + self.eps) + mean
 
 
 class GaussianNormalizer(nn.Module):
-    """
-    Global Gaussian normalizer using a single scalar mean/std.
-    """
+    """Global Gaussian normalizer using a single scalar mean/std."""
 
     def __init__(self, x: torch.Tensor, eps: float = 1e-5) -> None:
         super().__init__()
@@ -87,15 +127,14 @@ class GaussianNormalizer(nn.Module):
         self.eps = eps
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Normalize x using global mean/std.
-        """
-        return (x - self.mean) / (self.std + self.eps)
+        """Normalize x using global mean/std."""
+        mean = _to_device_dtype(self.mean, x)
+        std = _to_device_dtype(self.std, x)
+        return (x - mean) / (std + self.eps)
 
     def decode(self, x: torch.Tensor, sample_idx: Optional[Any] = None) -> torch.Tensor:
-        """
-        Inverse normalization.
-
-        sample_idx is kept for API compatibility and ignored.
-        """
-        return x * (self.std + self.eps) + self.mean
+        """Inverse normalization. sample_idx is ignored (kept for API compatibility)."""
+        _ = sample_idx
+        mean = _to_device_dtype(self.mean, x)
+        std = _to_device_dtype(self.std, x)
+        return x * (std + self.eps) + mean
