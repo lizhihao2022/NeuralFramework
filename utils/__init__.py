@@ -58,6 +58,7 @@ from .metrics import (
 # ----------------------------------------------------------------------
 from .vis import (
     ns2d_vis,
+    get_vis_fn,
 )
 
 # ----------------------------------------------------------------------
@@ -98,6 +99,7 @@ __all__ = [
     "Evaluator",
     # vis
     "ns2d_vis",
+    "get_vis_fn",
     # rollout
     "autoregressive_rollout",
 ]
