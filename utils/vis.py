@@ -85,7 +85,6 @@ def ns2d_vis(
 VisFn = Callable[..., None]
 
 VIS_REGISTRY: Dict[str, VisFn] = {
-    # 你项目里 data.name 可能是 ns2d / ns_2d / NS2D 等，统一兜底多注册几个 key
     "ns2d": ns2d_vis,
     "ns_2d": ns2d_vis,
     "navier_stokes_2d": ns2d_vis,

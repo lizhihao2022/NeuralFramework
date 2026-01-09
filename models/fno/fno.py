@@ -1,10 +1,11 @@
 # models/fno/fno.py
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from utils import to_spatial
 from .spectral_conv import SpectralConv1d, SpectralConv2d, SpectralConv3d
 
 
@@ -92,7 +93,13 @@ class FNO1d(nn.Module):
         grid = grid.view(1, 1, size)
         return grid
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         """
         Args:
             x: Tensor of shape (B, L, C_in), channels-last.
@@ -238,14 +245,23 @@ class FNO2d(nn.Module):
         grid = torch.stack((grid_y, grid_x), dim=0)  # (2, H, W)
         return grid.unsqueeze(0)  # (1, 2, H, W)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         """
         Args:
             x: Tensor of shape (B, H, W, C_in), channels-last.
+            coords: Optional tensor of coordinates.
+            geom: Optional geometry dictionary.
 
         Returns:
             Tensor of shape (B, H, W, C_out), channels-last.
         """
+        x, coords, ctx = to_spatial(x, coords=coords, geom=geom, require_shape=False)
         if x.dim() != 4:
             raise ValueError(f"Expected 4D input (B, H, W, C), got {x.shape}")
 
@@ -291,6 +307,9 @@ class FNO2d(nn.Module):
 
         # Back to channels-last
         x = x.permute(0, 2, 3, 1).contiguous()  # (B, H, W, C_out)
+        
+        x = ctx.restore_x(x)
+        
         return x
 
 

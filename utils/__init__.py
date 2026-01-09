@@ -68,6 +68,15 @@ from .rollout import (
     autoregressive_rollout,
 )
 
+# ----------------------------------------------------------------------
+# Spatial utilities
+# ----------------------------------------------------------------------
+from .spatial import (
+    to_spatial,
+    resolve_shape,
+    SpatialContext,
+)
+
 __all__ = [
     # helper
     "set_seed",
@@ -102,4 +111,8 @@ __all__ = [
     "get_vis_fn",
     # rollout
     "autoregressive_rollout",
+    # spatial
+    "to_spatial",
+    "resolve_shape",
+    "SpatialContext",
 ]
