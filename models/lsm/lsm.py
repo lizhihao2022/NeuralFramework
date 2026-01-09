@@ -1,3 +1,5 @@
+# models/lsm/lsm.py
+from typing import Any, Dict, Tuple, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -145,8 +147,15 @@ class LSM(nn.Module):
         x = self.fc2(x)
         return x
 
-    def forward(self, x, fx=None, T=None, geo=None):
-        x = x.view(x.size(0), -1, x.size(-1))
+    def forward(
+        self,
+        x: torch.Tensor,
+        fx=None,
+        T=None,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+        ) -> torch.Tensor:
         if self.geotype == 'unstructured':
             return self.unstructured_geo(x, fx, T)
         else:

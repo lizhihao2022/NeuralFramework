@@ -1,9 +1,11 @@
 # models/unet/unet2d.py
-from typing import Any
+from typing import Any, Dict, Tuple, Optional
 from collections import OrderedDict
 
 import torch
 import torch.nn as nn
+
+from utils import to_spatial
 
 
 class UNet2d(nn.Module):
@@ -162,7 +164,13 @@ class UNet2d(nn.Module):
     # ------------------------------------------------------------------
     # Forward
     # ------------------------------------------------------------------
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         """
         Forward pass.
 
@@ -172,6 +180,7 @@ class UNet2d(nn.Module):
         Returns:
             Output tensor of shape (B, H, W, C_out).
         """
+        x, coords, ctx = to_spatial(x, coords=coords, geom=geom, require_shape=False)
         assert x.dim() == 4, f"Expected (B, H, W, C), got shape {x.shape}"
         B, H, W, C = x.shape
 
@@ -213,7 +222,7 @@ class UNet2d(nn.Module):
 
         # (B, C_out, H, W) -> (B, H, W, C_out)
         out = out.permute(0, 2, 3, 1).contiguous()
-        return out
+        return ctx.restore_x(out)
 
     # ------------------------------------------------------------------
     # Initialization

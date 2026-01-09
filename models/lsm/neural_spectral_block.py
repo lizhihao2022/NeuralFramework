@@ -1,3 +1,4 @@
+# models/lsm/neural_spectral_block.py
 import torch
 import math
 import torch.nn as nn

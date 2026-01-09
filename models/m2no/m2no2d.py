@@ -1,10 +1,11 @@
 # models/m2no/m2no_2d.py
-from typing import List, Optional, Tuple
+from typing import Any, Dict, Tuple, Optional, List, Union
 
 import torch
 from torch import nn, Tensor
 
 from .grid_operator import LPFOperator2d
+from utils import to_spatial
 
 
 class GridBlock2d(nn.Module):
@@ -304,7 +305,13 @@ class M2NO2d(nn.Module):
         else:
             raise ValueError(f"Unsupported activation: {activation_name}")
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         """
         Args:
             x: input tensor, shape (B, H, W, C_in)
@@ -312,6 +319,7 @@ class M2NO2d(nn.Module):
         Returns:
             y: output tensor, shape (B, H, W, C_out)
         """
+        x, coords, ctx = to_spatial(x, coords=coords, geom=geom, require_shape=False)
         assert x.dim() == 4, f"Expected x of shape (B, H, W, C_in), got {x.shape}"
 
         B, H, W, C_in = x.shape
@@ -339,4 +347,4 @@ class M2NO2d(nn.Module):
         u = self.activation(self.hidden_proj(u))
         y = self.output_proj(u)
 
-        return y
+        return ctx.restore_x(y)

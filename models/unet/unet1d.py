@@ -1,5 +1,5 @@
 # models/unet/unet1d.py
-from typing import Any
+from typing import Any, Dict, Tuple, Optional
 from collections import OrderedDict
 
 import torch
@@ -162,7 +162,13 @@ class UNet1d(nn.Module):
     # ------------------------------------------------------------------
     # Forward
     # ------------------------------------------------------------------
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         """
         Forward pass.
 

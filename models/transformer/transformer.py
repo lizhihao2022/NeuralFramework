@@ -1,7 +1,7 @@
 # models/transformer/transformer.py
-import math
 from typing import Optional, Dict, Any
 
+import torch
 from torch import nn, Tensor
 
 from ..base import (
@@ -184,6 +184,9 @@ class Transformer(nn.Module):
         self,
         x: Tensor,
         attn_bias: Optional[Tensor] = None,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Tensor:
         """
         Args:
@@ -214,15 +217,14 @@ class Transformer(nn.Module):
         assert x.dim() >= 3, "x must be of shape (B, *spatial, C_in)."
 
         B = x.shape[0]
-        spatial_shape = x.shape[1:-1]   # tuple of 1D/2D/3D...
+        N = x.shape[1]
         C_in = x.shape[-1]
         assert C_in == self.in_channels, \
             f"Expected in_channels={self.in_channels}, but got {C_in}."
         
         # Flatten spatial dimensions to token sequence
-        N = int(math.prod(spatial_shape))  # number of tokens
-        x = x.view(B, N, C_in)             # (B, N, C_in)
-        coords = x[..., :self.rope_ndim] if C_in > 1 else None  # (B, N, rope_ndim) or None
+        spatial_shape = geom['spatial_shape'] if geom is not None and 'spatial_shape' in geom else x.shape[1:-1]
+        coords = coords  # (B, N, rope_ndim) or None
         x = self.input_proj(x)             # (B, N, d_model)
 
         # Build RoPE kwargs if needed
@@ -279,8 +281,6 @@ class Transformer(nn.Module):
             x = blk(x, attn_bias=attn_bias, rope_kwargs=rope_kwargs)
 
         x = self.norm_out(x)
-        x = self.output_proj(x)            # (B, N, C_out)
+        y = self.output_proj(x)            # (B, N, C_out)
 
-        # Reshape back to grid
-        y = x.view(B, *spatial_shape, self.out_channels)
         return y

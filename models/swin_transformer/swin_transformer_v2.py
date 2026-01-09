@@ -1,3 +1,4 @@
+# models/swin_transformer/swin_transformer_v2.py
 # --------------------------------------------------------
 # Swin Transformer V2
 # Copyright (c) 2022 Microsoft
@@ -5,6 +6,7 @@
 # Written by Ze Liu
 # --------------------------------------------------------
 
+from typing import Any, Dict, Tuple, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,6 +15,8 @@ from timm.layers.drop import DropPath
 from timm.layers.helpers import to_2tuple
 from timm.layers.weight_init import trunc_normal_
 import numpy as np
+
+from utils import to_spatial
 
 
 class Mlp(nn.Module):
@@ -669,12 +673,19 @@ class SwinTransformerV2(nn.Module):
         x = self.norm(x)          # (B, L_last, C_feat)
         return x
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         """
         PDE forward:
           input  x: (B, H, W, C_in)   - u_t
           output y: (B, H, W, C_out) - u_{t+1}
         """
+        x, coords, ctx = to_spatial(x, coords=coords, geom=geom, require_shape=False)
         assert x.dim() == 4, "Expected input shape (B, H, W, C_in)"
         B, H, W, C_in = x.shape
         assert (
@@ -688,7 +699,6 @@ class SwinTransformerV2(nn.Module):
         x = self.forward_features(x)   # (B, L, C_feat)
         x = self.out_proj(x)           # (B, L, C_out)
 
-        # 恢复到最终 patch 分辨率
         H_f, W_f = self.final_patches_resolution
         L = x.shape[1]
         assert (
@@ -697,7 +707,6 @@ class SwinTransformerV2(nn.Module):
 
         x = x.view(B, H_f, W_f, self.out_channels)  # (B, H_f, W_f, C_out)
 
-        # 如果最终 patch 分辨率比原始小（有 patch / downsample），做一次双线性插值
         if (H_f, W_f) != (H, W):
             x = F.interpolate(
                 x.permute(0, 3, 1, 2),   # (B, C_out, H_f, W_f)
@@ -706,7 +715,7 @@ class SwinTransformerV2(nn.Module):
                 align_corners=False,
             ).permute(0, 2, 3, 1)       # (B, H, W, C_out)
 
-        return x
+        return ctx.restore_x(x)
 
     def flops(self) -> float:
         """Rough FLOPs estimation."""

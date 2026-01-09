@@ -1,3 +1,4 @@
+# models/transolver/physics_attention.py
 """Physics-aware attention modules for various mesh types.
 
 This module provides compact, documented implementations of physics-aware

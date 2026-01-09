@@ -1,3 +1,5 @@
+# models/m2no/m2no1d.py
+from typing import Any, Dict, Tuple, Optional
 import torch
 import torch.nn as nn
 
@@ -13,16 +15,6 @@ class GridBlock1d(nn.Module):
         
         self.S = nn.ModuleList([nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1, bias=bias, padding_mode=padding_mode) for _ in range(num_ite)])
         self.A = nn.ModuleList([nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1, bias=bias, padding_mode=padding_mode) for _ in range(num_ite)])
-        
-    # def forward(self, f, u=None):
-    #     if u is None:
-    #         u = torch.zeros_like(f).to(f.device)
-            
-    #     for i in range(self.num_ite):
-    #         u = u + self.S[i](f)
-    #         f = f - self.A[i](u)
-
-    #     return f, u
     
     def forward(self, f, u=None):
         if u is None:
@@ -138,7 +130,13 @@ class M2NO1d(nn.Module):
         initializer(self.L_hidden.weight)
         initializer(self.L_out.weight)
         
-    def forward(self, x):
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         u = self.L_in(x)
         u = u.permute(0, 2, 1)
         for i in range(self.num_layer):

@@ -1,9 +1,11 @@
+# models/galerkin_transformer/galerkin_transformer.py
 import torch
 import torch.nn as nn
+import os.path as osp
 from timm.layers.weight_init import trunc_normal_
 from .basic import MLP, LinearAttention
 
-import os.path as osp
+from typing import Any, Dict, Optional
 
 
 class GalerkinTransformerBlock(nn.Module):
@@ -84,14 +86,17 @@ class GalerkinTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x):
-        B, H, W, C = x.size()
-        x = x.view(B, H * W, C)
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         fx = self.preprocess(x)
         fx = fx + self.placeholder[None, None, :]
 
         for block in self.blocks:
             fx = block(fx)
             
-        fx = fx.view(B, H, W, -1)
         return fx

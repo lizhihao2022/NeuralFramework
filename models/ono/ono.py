@@ -1,3 +1,5 @@
+# models/ono/ono.py
+from typing import Any, Dict, Tuple, Optional
 import torch
 import torch.nn as nn
 from timm.layers.weight_init import trunc_normal_
@@ -158,8 +160,15 @@ class ONO(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward(self, x, fx=None, T=None, geo=None):
-        x = x.view(x.shape[0], -1, x.shape[-1])
+    def forward(
+        self,
+        x: torch.Tensor,
+        fx=None,
+        T=None,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+        ) -> torch.Tensor:
         if self.unified_pos:
             x = self.pos.repeat(x.shape[0], 1, 1)
         if fx is not None:

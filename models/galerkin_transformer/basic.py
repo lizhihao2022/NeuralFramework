@@ -1,3 +1,4 @@
+# models/galerkin_transformer/basic.py
 import math
 from typing import Optional
 

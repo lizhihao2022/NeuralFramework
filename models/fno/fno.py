@@ -416,7 +416,13 @@ class FNO3d(nn.Module):
         grid = torch.stack((grid_d, grid_h, grid_w), dim=0)  # (3, D, H, W)
         return grid.unsqueeze(0)  # (1, 3, D, H, W)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: Optional[torch.Tensor] = None,
+        geom: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         """
         Args:
             x: Tensor of shape (B, D, H, W, C_in), channels-last.
@@ -424,6 +430,7 @@ class FNO3d(nn.Module):
         Returns:
             y: Tensor of shape (B, D, H, W, C_out), channels-last.
         """
+        x, coords, ctx = to_spatial(x, coords=coords, geom=geom, require_shape=False)
         if x.dim() != 5:
             raise ValueError(f"Expected 5D input (B, D, H, W, C), got {x.shape}")
         B, D, H, W, C_in = x.shape
@@ -468,4 +475,5 @@ class FNO3d(nn.Module):
 
         # channels-first -> channels-last
         x = x.permute(0, 2, 3, 4, 1).contiguous()  # (B, D, H, W, C_out)
+        x = ctx.restore_x(x)
         return x
