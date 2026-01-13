@@ -14,7 +14,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from tqdm import tqdm
 
-from utils import LossRecord, LpLoss, autoregressive_rollout, Evaluator
+from utils import LossRecord, LpLoss, CompositeLoss, build_loss_fn, Evaluator, autoregressive_rollout
 
 from models import MODEL_REGISTRY
 from datasets import DATASET_REGISTRY
@@ -358,7 +358,10 @@ class BaseTrainer:
 
     def build_loss(self, **kwargs: Any):
         # Relative Lp loss, averaged over batch
-        return LpLoss(size_average=True)
+        loss_cfg = self.args.get("loss", None)
+        if loss_cfg is None:
+            return LpLoss(size_average=True)
+        return build_loss_fn(loss_cfg)
 
     def build_evaluator(self):
         # Configurable evaluation metrics (see YAML: `evaluate` section).
@@ -622,11 +625,16 @@ class BaseTrainer:
             # Unified forward (auto-inject coords / geom / y)
             y_pred = self._forward_model(x, y)
 
-            loss = self.loss_fn(y_pred, y)  # scalar
-
-            loss_record.update(
-                {"train_loss": float(loss.item())}, n=x.size(0)
-            )
+            loss_kwargs = {"x": x, "coords": self.coords, "geom": self.geom}
+            if isinstance(self.loss_fn, CompositeLoss):
+                loss, logs = self.loss_fn(y_pred, y, return_dict=True)
+                update_dict = {"train_loss": float(loss.item())}
+                for k, v in logs.items(): # type: ignore
+                    update_dict[f"train_{k}"] = float(v)
+                loss_record.update(update_dict, n=x.size(0))
+            else:
+                loss = self.loss_fn(y_pred, y, **loss_kwargs)
+                loss_record.update({"train_loss": float(loss.item())}, n=x.size(0))
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -694,10 +702,18 @@ class BaseTrainer:
 
         y = torch.cat(all_y, dim=0)
         y_pred = torch.cat(all_y_pred, dim=0)
+        
+        loss_kwargs = {"x": None, "coords": self.coords, "geom": self.geom}
+        if isinstance(self.loss_fn, CompositeLoss):
+            loss, logs = self.loss_fn(y_pred, y, return_dict=True, **loss_kwargs)
+        else:
+            loss = self.loss_fn(y_pred, y, **loss_kwargs)
+            logs = None
 
-        loss = self.loss_fn(y_pred, y)
         total_samples = y.size(0)
         loss_record.update({f"{split}_loss": float(loss.item())}, n=total_samples)
+        if logs is not None:
+            loss_record.update({f"{split}_{k}": float(v) for k, v in logs.items()}, n=total_samples) # type: ignore
 
         if self.y_normalizer is not None and hasattr(self.y_normalizer, "decode"):
             y_pred = self.y_normalizer.decode(y_pred)
