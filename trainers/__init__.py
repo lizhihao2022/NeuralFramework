@@ -18,6 +18,7 @@ TRAINER_REGISTRY = {
     "GNOT": BaseTrainer,
     "ONO": BaseTrainer,
     "LSM": BaseTrainer,
+    "LNO": BaseTrainer,
 }
 
 __all__ = ['BaseTrainer', 'TRAINER_REGISTRY']

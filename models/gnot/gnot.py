@@ -9,8 +9,6 @@ from .basic import MLP, LinearAttention, ACTIVATION
 from ..base import timestep_embedding, unified_pos_embedding
 
 
-
-
 class GNOTBlock(nn.Module):
     """Transformer encoder block in MOE style."""
 

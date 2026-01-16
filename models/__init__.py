@@ -10,6 +10,7 @@ from .transolver import Transolver
 from .gnot import GNOT
 from .ono import ONO
 from .lsm import LSM
+from .lno import LNO
 
 
 MODEL_REGISTRY = {
@@ -29,6 +30,7 @@ MODEL_REGISTRY = {
     "GNOT": GNOT,
     "ONO": ONO,
     "LSM": LSM,
+    "LNO": LNO,
 }
 
 __all__ = [
@@ -36,5 +38,6 @@ __all__ = [
     "MLP", "UNet1d", "UNet2d", "UNet3d", 
     "FNO1d", "FNO2d", "FNO3d",
     "Transformer", "M2NO2d", "SwinTransformerV2", "SwinMLP",
-    "GalerkinTransformer", "Transolver", "GNOT", "ONO", "LSM"
+    "GalerkinTransformer", "Transolver", "GNOT", "ONO", "LSM",
+    "LNO",
     ]

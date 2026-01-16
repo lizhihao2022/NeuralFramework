@@ -144,6 +144,7 @@ class Transolver(nn.Module):
         geom: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
+        fx = coords
         if self.geotype == 'unstructured':
             return self.unstructured_geo(x, fx, T)
         else:
