@@ -205,8 +205,6 @@ class LNO(torch.nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        fx = None,
-        T = None,
         coords: Optional[torch.Tensor] = None,
         geom: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
